@@ -216,22 +216,32 @@ public final class LauncherActivity extends Activity {
         settingsPanel.addView(section("RENDERIZAÇÃO"));
         
         String driverName = readString("custom_driver_name", "Padrão do Sistema (Vulkan Mali)");
-        TextView driverStatus = label("Driver: " + driverName, 10, WHITE, true);
+        TextView driverStatus = label("Driver Ativo: " + driverName, 10, WHITE, true);
         driverStatus.setPadding(dp(2), dp(2), dp(2), dp(2));
         settingsPanel.addView(driverStatus);
 
         LinearLayout driverBtns = new LinearLayout(this);
         driverBtns.setOrientation(LinearLayout.HORIZONTAL);
 
+        TextView selectBtn = label("SELECIONAR", 9, WHITE, true);
+        selectBtn.setGravity(Gravity.CENTER);
+        selectBtn.setPadding(dp(4), dp(2), dp(4), dp(2));
+        selectBtn.setBackground(outlined(0x44203040, 0x885090FF, 6));
+        selectBtn.setOnClickListener(v -> showDriverSelectDialog());
+        driverBtns.addView(selectBtn, new LinearLayout.LayoutParams(0, dp(32), 1.0f));
+
+        View btnSpace1 = new View(this);
+        driverBtns.addView(btnSpace1, new LinearLayout.LayoutParams(dp(4), 1));
+
         TextView importBtn = label("IMPORTAR (.ZIP)", 9, WHITE, true);
         importBtn.setGravity(Gravity.CENTER);
         importBtn.setPadding(dp(4), dp(2), dp(4), dp(2));
-        importBtn.setBackground(outlined(0x44203040, 0x885090FF, 6));
+        importBtn.setBackground(outlined(0x44204030, 0x8840D080, 6));
         importBtn.setOnClickListener(v -> pickDriverZip());
         driverBtns.addView(importBtn, new LinearLayout.LayoutParams(0, dp(32), 1.0f));
 
-        View btnSpace = new View(this);
-        driverBtns.addView(btnSpace, new LinearLayout.LayoutParams(dp(6), 1));
+        View btnSpace2 = new View(this);
+        driverBtns.addView(btnSpace2, new LinearLayout.LayoutParams(dp(4), 1));
 
         TextView resetBtn = label("RESTAURAR", 9, 0xFFE0E0E0, true);
         resetBtn.setGravity(Gravity.CENTER);
@@ -265,6 +275,32 @@ public final class LauncherActivity extends Activity {
         filterRow.addView(aniso, new LinearLayout.LayoutParams(-2, dp(30)));
         settingsPanel.addView(filterRow);
 
+        // Monitoramento de Desempenho (FPS, CPU, GPU)
+        LinearLayout fpsRow = new LinearLayout(this);
+        fpsRow.setGravity(Gravity.CENTER_VERTICAL);
+        fpsRow.setPadding(0, dp(2), 0, dp(2));
+        
+        LinearLayout fpsTextCol = new LinearLayout(this);
+        fpsTextCol.setOrientation(LinearLayout.VERTICAL);
+        TextView fpsLabel = label("Monitor de Desempenho (FPS, CPU, GPU)", 10, 0xFFFFFFFF, true);
+        TextView fpsSub = label("Exibe FPS, tempo de quadro, CPU% e temp. na tela", 8, 0xFFA0A5AA, false);
+        fpsTextCol.addView(fpsLabel);
+        fpsTextCol.addView(fpsSub);
+        fpsRow.addView(fpsTextCol, new LinearLayout.LayoutParams(0, -2, 1));
+
+        Switch fpsSwitch = new Switch(this);
+        fpsSwitch.setShowText(false);
+        fpsSwitch.setThumbTintList(new ColorStateList(
+                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
+                new int[] {0xFFFFFFFF, 0xFFE2E5E9}));
+        fpsSwitch.setTrackTintList(new ColorStateList(
+                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
+                new int[] {0xFF00E676, 0xFF747A82}));
+        fpsSwitch.setChecked(readBool("fps_counter", true));
+        fpsSwitch.setOnCheckedChangeListener((b, checked) -> writeSettingBool("fps_counter", checked));
+        fpsRow.addView(fpsSwitch, new LinearLayout.LayoutParams(-2, dp(30)));
+        settingsPanel.addView(fpsRow);
+
         settingsPanel.addView(section("CONTROLES"));
         addValueRow("Controle de Toque", "Xbox Clássico");
         settingsPanel.addView(label("Mapeamento de Gamepad", 10, 0xFFE4E7EB, false));
@@ -290,15 +326,7 @@ public final class LauncherActivity extends Activity {
 
         settingsPanel.addView(section("SISTEMA"));
         addValueRow("Idioma", "Internacional");
-        TextView update = label("Verificar atualizações", 12, WHITE, true);
-        update.setGravity(Gravity.CENTER);
-        update.setBackground(round(0x55333333, 7));
-        update.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("Atualizações")
-                .setMessage("A verificação automática de atualizações ainda não está configurada.")
-                .setPositiveButton("OK", null).show());
-        LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(-1, dp(29));
-        up.topMargin = dp(2);
-        settingsPanel.addView(update, up);
+        addValueRow("Versão", "MotorForza 1.0 (ARM64 Nativo)");
     }
 
     private void recreateSettings() {
@@ -306,6 +334,43 @@ public final class LauncherActivity extends Activity {
             settingsPanel.removeAllViews();
             addSettings();
         }
+    }
+
+    private void showDriverSelectDialog() {
+        java.util.List<String> options = new java.util.ArrayList<>();
+        options.add("Padrão do Sistema (Vulkan Mali)");
+
+        File customDir = new File(getFilesDir(), "custom_driver");
+        String current = readString("custom_driver_name", "Padrão do Sistema (Vulkan Mali)");
+        
+        if (customDir.exists() && customDir.list() != null && customDir.list().length > 0) {
+            String installedTitle = current.contains("Padrão") ? "Driver Customizado Instalado" : current;
+            options.add(installedTitle);
+        }
+        options.add("📁 Importar novo pacote (.zip)...");
+
+        int selectedIdx = 0;
+        if (!current.contains("Padrão") && options.size() > 2) {
+            selectedIdx = 1;
+        }
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("Selecionar Driver Vulkan");
+        b.setSingleChoiceItems(options.toArray(new String[0]), selectedIdx, (dialog, which) -> {
+            dialog.dismiss();
+            if (which == 0) {
+                resetSystemDriver();
+            } else if (which == options.size() - 1 && options.get(which).startsWith("📁")) {
+                pickDriverZip();
+            } else {
+                writeSettingString("custom_driver_name", options.get(which));
+                writeSetting("custom_driver_enabled", 1);
+                Toast.makeText(this, "Driver selecionado: " + options.get(which), Toast.LENGTH_SHORT).show();
+                recreateSettings();
+            }
+        });
+        b.setNegativeButton("Cancelar", null);
+        b.show();
     }
 
     private void pickDriverZip() {
@@ -551,6 +616,40 @@ public final class LauncherActivity extends Activity {
             Pattern p = Pattern.compile("(?m)^\\s*" + Pattern.quote(key) + "\\s*=\\s*[^\\r\\n]*");
             Matcher m = p.matcher(content);
             String line = key + " = \"" + value + "\"";
+            content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : content + (content.endsWith("\n") || content.isEmpty() ? "" : "\n") + line + "\n";
+            File temp = new File(own, "forza.toml.tmp");
+            Files.write(temp.toPath(), content.getBytes(StandardCharsets.UTF_8));
+            if (!temp.renameTo(file)) {
+                Files.copy(temp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                temp.delete();
+            }
+        } catch (Exception e) { Toast.makeText(this, "Não foi possível salvar a configuração.", Toast.LENGTH_SHORT).show(); }
+    }
+
+    private boolean readBool(String key, boolean fallback) {
+        File own = getExternalFilesDir(null);
+        if (own == null) return fallback;
+        try {
+            Matcher m = Pattern.compile("(?m)^\\s*" + Pattern.quote(key) + "\\s*=\\s*(true|false|1|0)").matcher(
+                    new String(Files.readAllBytes(new File(own, "forza.toml").toPath()), StandardCharsets.UTF_8));
+            if (m.find()) {
+                String val = m.group(1).toLowerCase();
+                return val.equals("true") || val.equals("1");
+            }
+            return fallback;
+        } catch (Exception ignored) { return fallback; }
+    }
+
+    private void writeSettingBool(String key, boolean value) {
+        File own = getExternalFilesDir(null);
+        if (own == null) return;
+        try {
+            own.mkdirs();
+            File file = new File(own, "forza.toml");
+            String content = file.isFile() ? new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8) : "";
+            Pattern p = Pattern.compile("(?m)^\\s*" + Pattern.quote(key) + "\\s*=\\s*[^\\r\\n]*");
+            Matcher m = p.matcher(content);
+            String line = key + " = " + (value ? "true" : "false");
             content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : content + (content.endsWith("\n") || content.isEmpty() ? "" : "\n") + line + "\n";
             File temp = new File(own, "forza.toml.tmp");
             Files.write(temp.toPath(), content.getBytes(StandardCharsets.UTF_8));

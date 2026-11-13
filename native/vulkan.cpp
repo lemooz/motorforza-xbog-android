@@ -1334,6 +1334,44 @@ uint32_t perf2_cube_blits_ = 0;
     std::chrono::steady_clock::time_point perf2_t_ = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point fps_t_ = std::chrono::steady_clock::now();
     uint64_t fps_n_ = 0;
+
+    // Fase 2: Pass-scoped state deduplication
+    VkPipeline cur_pipe_ = VK_NULL_HANDLE;
+    VkDescriptorSet cur_set_ = VK_NULL_HANDLE;
+    uint32_t cur_vc_off_ = 0xFFFFFFFF;
+    uint32_t cur_dc_off_ = 0xFFFFFFFF;
+    VkViewport cur_vp_{};
+    VkRect2D cur_sc_{};
+    float cur_blend_constants_[4] = {-999.0f, -999.0f, -999.0f, -999.0f};
+    uint32_t cur_stencil_ref_ = 0xFFFFFFFF;
+    uint32_t cur_vb_count_ = 0;
+    VkBuffer cur_vbufs_[16]{};
+    VkDeviceSize cur_voffs_[16]{};
+    VkBuffer cur_ib_ = VK_NULL_HANDLE;
+    VkDeviceSize cur_ib_off_ = 0xFFFFFFFF;
+    VkIndexType cur_ib_type_ = VK_INDEX_TYPE_MAX_ENUM;
+    void ResetPassState();
+
+    // Fase 2: Constant buffer deduplication
+    struct ConstMemoEntry {
+        uint64_t hash = 0;
+        uint64_t present = 0;
+        uint32_t bytes = 0;
+        Alloc alloc{};
+        uint8_t data[3072]{};
+    };
+    static constexpr size_t kConstMemoEntries = 64;
+    ConstMemoEntry const_memo_[kConstMemoEntries]{};
+
+    // Fase 2: Vertex/index buffer upload deduplication
+    struct VbCacheEntry {
+        const void* src = nullptr;
+        uint32_t bytes = 0;
+        uint64_t present = 0;
+        Alloc alloc{};
+    };
+    static constexpr size_t kVbCacheEntries = 32;
+    VbCacheEntry vb_cache_[kVbCacheEntries]{};
 };
 
 #define VK_CHECK(x)                                                    \
@@ -1891,9 +1929,47 @@ VulkanBackend::Alloc VulkanBackend::Upload(VkDeviceSize size, VkDeviceSize align
 }
 
 VulkanBackend::Alloc VulkanBackend::Constants(const void* data, size_t bytes) {
+    if (!data || !bytes) {
+        Alloc a = Upload(kUboRange, kUboAlign);
+        return a;
+    }
+    if (bytes <= sizeof(const_memo_[0].data)) {
+        uint64_t h = Hash(data, bytes);
+        size_t slot = (h ^ (h >> 16)) % kConstMemoEntries;
+        ConstMemoEntry& e = const_memo_[slot];
+        if (e.present == presents_ && e.bytes == bytes && e.hash == h && std::memcmp(e.data, data, bytes) == 0) {
+            ++perf2_const_reuse_;
+            return e.alloc;
+        }
+        Alloc a = Upload(kUboRange, kUboAlign);
+        std::memcpy(a.cpu, data, std::min<size_t>(bytes, kUboRange));
+        e.hash = h;
+        e.present = presents_;
+        e.bytes = uint32_t(bytes);
+        e.alloc = a;
+        std::memcpy(e.data, data, bytes);
+        return a;
+    }
     Alloc a = Upload(kUboRange, kUboAlign);
-    if (bytes && data) std::memcpy(a.cpu, data, std::min<size_t>(bytes, kUboRange));
+    std::memcpy(a.cpu, data, std::min<size_t>(bytes, kUboRange));
     return a;
+}
+
+void VulkanBackend::ResetPassState() {
+    cur_pipe_ = VK_NULL_HANDLE;
+    cur_set_ = VK_NULL_HANDLE;
+    cur_vc_off_ = 0xFFFFFFFF;
+    cur_dc_off_ = 0xFFFFFFFF;
+    std::memset(&cur_vp_, 0, sizeof(cur_vp_));
+    std::memset(&cur_sc_, 0, sizeof(cur_sc_));
+    cur_blend_constants_[0] = -999.0f;
+    cur_stencil_ref_ = 0xFFFFFFFF;
+    cur_vb_count_ = 0;
+    std::memset(cur_vbufs_, 0, sizeof(cur_vbufs_));
+    std::memset(cur_voffs_, 0, sizeof(cur_voffs_));
+    cur_ib_ = VK_NULL_HANDLE;
+    cur_ib_off_ = 0xFFFFFFFF;
+    cur_ib_type_ = VK_INDEX_TYPE_MAX_ENUM;
 }
 
 // ---- command recording
@@ -1904,7 +1980,8 @@ void VulkanBackend::Begin() {
     vkBeginCommandBuffer(Cb(), &bi);
     rendering_ = false;
     rend_color_ = rend_depth_ = nullptr;
-    }
+    ResetPassState();
+}
 
 uint64_t VulkanBackend::Completed() {
     if (!timeline_ok_) {
@@ -2066,6 +2143,7 @@ void VulkanBackend::BeginRender(Image* color, Image* depth) {
     rendering_ = true;
     rend_color_ = color;
     rend_depth_ = depth;
+    ResetPassState();
     if (!dynamic_) {
         Image* any = color ? color : depth;
         VkFormat cf = color ? color->fmt : VK_FORMAT_UNDEFINED, df = depth ? depth->fmt : VK_FORMAT_UNDEFINED;
@@ -2118,6 +2196,7 @@ void VulkanBackend::EndRender() {
         vkCmdEndRenderPass(Cb());
     rendering_ = false;
     rend_color_ = rend_depth_ = nullptr;
+    ResetPassState();
 }
 
 // the layouts stay the attachment ones throughout, as with dynamic rendering: barriers outside do the transitions.
@@ -2197,12 +2276,16 @@ void VulkanBackend::DropFramebuffers(VkImageView v) {
 // in the D3D convention, y down from the top: a negative height turns Vulkan's clip space the same way up
 void VulkanBackend::SetViewport(float x, float y, float w, float h) {
     VkViewport vp{x, y + h, w, -h, 0, 1};
+    if (std::memcmp(&vp, &cur_vp_, sizeof(vp)) == 0) return;
     vkCmdSetViewport(Cb(), 0, 1, &vp);
+    cur_vp_ = vp;
 }
 
 void VulkanBackend::SetScissor(int32_t x0, int32_t y0, int32_t x1, int32_t y1) {
     VkRect2D r{{std::max(x0, 0), std::max(y0, 0)}, {uint32_t(std::max(x1 - std::max(x0, 0), 0)), uint32_t(std::max(y1 - std::max(y0, 0), 0))}};
+    if (std::memcmp(&r, &cur_sc_, sizeof(r)) == 0) return;
     vkCmdSetScissor(Cb(), 0, 1, &r);
+    cur_sc_ = r;
 }
 
 // the draw's descriptor set: the ring at b0 and b1 (offsets bound with it), the views and samplers; one per
@@ -3741,16 +3824,47 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     VkDeviceSize voffs[16];
     for (uint32_t i = 0; i < a.buffer_count; i++) {
         const VertexBuffer& b = a.buffers[i];
-        Alloc v = Upload(std::max<uint32_t>(b.bytes, 4), 16);
-        if (b.src && b.bytes) std::memcpy(v.cpu, b.src, b.bytes);
+        Alloc v{};
+        if (b.src && b.bytes) {
+            uintptr_t ptr_val = reinterpret_cast<uintptr_t>(b.src);
+            size_t slot = ((ptr_val >> 4) ^ (b.bytes >> 2)) % kVbCacheEntries;
+            VbCacheEntry& ve = vb_cache_[slot];
+            if (ve.present == presents_ && ve.src == b.src && ve.bytes == b.bytes) {
+                v = ve.alloc;
+            } else {
+                v = Upload(std::max<uint32_t>(b.bytes, 4), 16);
+                std::memcpy(v.cpu, b.src, b.bytes);
+                ve.src = b.src;
+                ve.bytes = b.bytes;
+                ve.present = presents_;
+                ve.alloc = v;
+            }
+        } else {
+            v = Upload(std::max<uint32_t>(b.bytes, 4), 16);
+        }
         vbufs[i] = v.buf;
         voffs[i] = v.off;
     }
     Alloc ib{};
     if (a.index_count) {
         uint32_t ibytes = a.index_count * (a.index16 ? 2 : 4);
-        ib = Upload(ibytes, 4);
-        std::memcpy(ib.cpu, a.index_src, ibytes);
+        if (a.index_src && ibytes) {
+            uintptr_t ptr_val = reinterpret_cast<uintptr_t>(a.index_src);
+            size_t slot = ((ptr_val >> 2) ^ ibytes) % kVbCacheEntries;
+            VbCacheEntry& ie = vb_cache_[slot];
+            if (ie.present == presents_ && ie.src == a.index_src && ie.bytes == ibytes) {
+                ib = ie.alloc;
+            } else {
+                ib = Upload(ibytes, 4);
+                std::memcpy(ib.cpu, a.index_src, ibytes);
+                ie.src = a.index_src;
+                ie.bytes = ibytes;
+                ie.present = presents_;
+                ie.alloc = ib;
+            }
+        } else {
+            ib = Upload(ibytes, 4);
+        }
     }
     bool clamp = AnyStageWraps(s) && UnitTexcoords(a);
     VkSampler samplers[4];
@@ -3767,8 +3881,16 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         ++draw_ds_->perf2_draws;
     }
     if (draw_ds_) draw_ds_->drawn = true;
-    vkCmdBindPipeline(Cb(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-    BindSet(set, vc.off, dc.off);
+    if (pipe != cur_pipe_) {
+        vkCmdBindPipeline(Cb(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+        cur_pipe_ = pipe;
+    }
+    if (set != cur_set_ || vc.off != cur_vc_off_ || dc.off != cur_dc_off_) {
+        BindSet(set, vc.off, dc.off);
+        cur_set_ = set;
+        cur_vc_off_ = uint32_t(vc.off);
+        cur_dc_off_ = uint32_t(dc.off);
+    }
     Target& bt = draw_rt_ ? *draw_rt_ : *draw_ds_;
     float W = float(bt.w), H = float(bt.h);
     SetViewport(0, 0, W, H);
@@ -3785,14 +3907,47 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                std::clamp(y1, 0, int32_t(H)));
     float bf[4];
     Color(SimpleState(s, kMBlendColor), bf);
-    vkCmdSetBlendConstants(Cb(), bf);
-    vkCmdSetStencilReference(Cb(), VK_STENCIL_FACE_FRONT_AND_BACK, SimpleState(s, kMStencilRef) & 0xFF);
-    if (a.buffer_count) vkCmdBindVertexBuffers(Cb(), 0, a.buffer_count, vbufs, voffs);
+    if (std::memcmp(bf, cur_blend_constants_, sizeof(bf)) != 0) {
+        vkCmdSetBlendConstants(Cb(), bf);
+        std::memcpy(cur_blend_constants_, bf, sizeof(bf));
+    }
+    uint32_t sref = SimpleState(s, kMStencilRef) & 0xFF;
+    if (sref != cur_stencil_ref_) {
+        vkCmdSetStencilReference(Cb(), VK_STENCIL_FACE_FRONT_AND_BACK, sref);
+        cur_stencil_ref_ = sref;
+    }
+    if (a.buffer_count) {
+        bool vb_diff = (a.buffer_count != cur_vb_count_);
+        if (!vb_diff) {
+            for (uint32_t i = 0; i < a.buffer_count; ++i) {
+                if (cur_vbufs_[i] != vbufs[i] || cur_voffs_[i] != voffs[i]) {
+                    vb_diff = true;
+                    break;
+                }
+            }
+        }
+        if (vb_diff) {
+            vkCmdBindVertexBuffers(Cb(), 0, a.buffer_count, vbufs, voffs);
+            cur_vb_count_ = a.buffer_count;
+            std::memcpy(cur_vbufs_, vbufs, a.buffer_count * sizeof(VkBuffer));
+            std::memcpy(cur_voffs_, voffs, a.buffer_count * sizeof(VkDeviceSize));
+        }
+    } else {
+        cur_vb_count_ = 0;
+    }
     if (a.index_count) {
-        vkCmdBindIndexBuffer(Cb(), ib.buf, ib.off, a.index16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+        VkIndexType itype = a.index16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+        if (ib.buf != cur_ib_ || ib.off != cur_ib_off_ || itype != cur_ib_type_) {
+            vkCmdBindIndexBuffer(Cb(), ib.buf, ib.off, itype);
+            cur_ib_ = ib.buf;
+            cur_ib_off_ = ib.off;
+            cur_ib_type_ = itype;
+        }
         ++perf2_draws_;
         vkCmdDrawIndexed(Cb(), a.index_count, 1, 0, a.base_vertex, 0);
     } else {
+        cur_ib_ = VK_NULL_HANDLE;
+        cur_ib_off_ = 0xFFFFFFFF;
         ++perf2_draws_;
         vkCmdDraw(Cb(), a.draw_count, 1, 0, 0);
     }
