@@ -826,14 +826,25 @@ void KeyRasterizer(const State& s, const Assembled& a, PsoKey& k) {
 
 constexpr float kAlphaTestAlways = 7.0f;
 
-// FOG off leaves the constants as fog disabled: the shaders' fog factor is then 1, the colour as drawn
-void FillFogConstants(const State& s, DrawConstants& c) {
-    if (!s.rs[kRsFogEnable] || !game::Opt().fog || s.rs[kRsFogColor] == 0) return;
+// D3DRS_FOGTABLEMODE values
+constexpr uint32_t kFogTableNone = 0;
+constexpr float kFogTableLinear = 3.0f;
+
+// FOG off leaves the constants as fog disabled: the shaders' fog factor is then 0, the colour as drawn
+void FillFogConstants(const State& s, bool vertex_program, DrawConstants& c) {
+    if (!s.rs[kRsFogEnable] || !game::Opt().fog) return;
     const uint32_t table_mode = s.rs[kRsFogTableMode];
+    if (vertex_program && table_mode == kFogTableNone) {
+        c.fog[0] = 1.0f;
+        c.fog[1] = 0.0f;
+        c.fog[2] = 0.0f;
+        c.fog[3] = kFogTableLinear;
+        return;
+    }
     c.fog[0] = Bits(s.rs[kRsFogStart]);
     c.fog[1] = Bits(s.rs[kRsFogEnd]);
     c.fog[2] = Bits(s.rs[kRsFogDensity]);
-    c.fog[3] = table_mode == 0 ? 4.0f : float(table_mode);
+    c.fog[3] = float(table_mode);
 }
 
 void FillSurfaceConstants(const State& s, GuestExtent size, DrawConstants& c) {
@@ -1362,16 +1373,6 @@ uint32_t perf2_cube_blits_ = 0;
     };
     static constexpr size_t kConstMemoEntries = 64;
     ConstMemoEntry const_memo_[kConstMemoEntries]{};
-
-    // Fase 2: Vertex/index buffer upload deduplication
-    struct VbCacheEntry {
-        const void* src = nullptr;
-        uint32_t bytes = 0;
-        uint64_t present = 0;
-        Alloc alloc{};
-    };
-    static constexpr size_t kVbCacheEntries = 32;
-    VbCacheEntry vb_cache_[kVbCacheEntries]{};
 };
 
 #define VK_CHECK(x)                                                    \
@@ -3764,7 +3765,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     SurfaceSize(draw_rt_ ? s.rt : s.zs, size.w, size.h);
     DrawConstants c{};
     FillSurfaceConstants(s, size, c);
-    FillFogConstants(s, c);
+    FillFogConstants(s, sh.prog, c);
     FillCombinerConstants(s, c);
     FillTextureConstants(s, stages, c);
     if (!trace_dir_.empty() && draw_rt_ && draw_rt_->gw == 640 && draw_rt_->gh == 480 &&
@@ -3824,47 +3825,16 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     VkDeviceSize voffs[16];
     for (uint32_t i = 0; i < a.buffer_count; i++) {
         const VertexBuffer& b = a.buffers[i];
-        Alloc v{};
-        if (b.src && b.bytes) {
-            uintptr_t ptr_val = reinterpret_cast<uintptr_t>(b.src);
-            size_t slot = ((ptr_val >> 4) ^ (b.bytes >> 2)) % kVbCacheEntries;
-            VbCacheEntry& ve = vb_cache_[slot];
-            if (ve.present == presents_ && ve.src == b.src && ve.bytes == b.bytes) {
-                v = ve.alloc;
-            } else {
-                v = Upload(std::max<uint32_t>(b.bytes, 4), 16);
-                std::memcpy(v.cpu, b.src, b.bytes);
-                ve.src = b.src;
-                ve.bytes = b.bytes;
-                ve.present = presents_;
-                ve.alloc = v;
-            }
-        } else {
-            v = Upload(std::max<uint32_t>(b.bytes, 4), 16);
-        }
+        Alloc v = Upload(std::max<uint32_t>(b.bytes, 4), 16);
+        if (b.src && b.bytes) std::memcpy(v.cpu, b.src, b.bytes);
         vbufs[i] = v.buf;
         voffs[i] = v.off;
     }
     Alloc ib{};
     if (a.index_count) {
         uint32_t ibytes = a.index_count * (a.index16 ? 2 : 4);
-        if (a.index_src && ibytes) {
-            uintptr_t ptr_val = reinterpret_cast<uintptr_t>(a.index_src);
-            size_t slot = ((ptr_val >> 2) ^ ibytes) % kVbCacheEntries;
-            VbCacheEntry& ie = vb_cache_[slot];
-            if (ie.present == presents_ && ie.src == a.index_src && ie.bytes == ibytes) {
-                ib = ie.alloc;
-            } else {
-                ib = Upload(ibytes, 4);
-                std::memcpy(ib.cpu, a.index_src, ibytes);
-                ie.src = a.index_src;
-                ie.bytes = ibytes;
-                ie.present = presents_;
-                ie.alloc = ib;
-            }
-        } else {
-            ib = Upload(ibytes, 4);
-        }
+        ib = Upload(ibytes, 4);
+        if (a.index_src && ibytes) std::memcpy(ib.cpu, a.index_src, ibytes);
     }
     bool clamp = AnyStageWraps(s) && UnitTexcoords(a);
     VkSampler samplers[4];
