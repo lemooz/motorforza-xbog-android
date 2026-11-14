@@ -103,6 +103,7 @@ const app::GameInfo app::kGame = {
     .images = {{"default.xbe", "Forza"}},
     .options = {{"skip_intros", &game::Opt().skip_intros, nullptr},
                 {"fps_counter", &game::Opt().fps_counter, nullptr},
+                {"touch_style", nullptr, &game::Opt().touch_style},
                 {"bloom", &game::Opt().bloom, nullptr},
                 {"fog", &game::Opt().fog, nullptr},
                 {"anti_aliasing", nullptr, &game::Opt().anti_aliasing},

@@ -13,6 +13,7 @@ inline constexpr const char* kLanguages[] = {"int"};
 struct Options {
     bool skip_intros = false;  // skip Bink intro videos at boot
     bool fps_counter = true;
+    uint32_t touch_style = 0;  // the touch controls: 0 Xbox Classic, 1 Android (the launcher sets it)
     uint32_t fmv_scale = 0;  // 4:3 films on a wider screen: 0 fill it, top and bottom cut; 1 kept 4:3
     // a look over the frame: 0 none, 1 and 2 a CRT (light, strong), 3 sharpen, 4 vibrant, 5 noir, 6 sepia,
     // 7 night vision, 8 VHS

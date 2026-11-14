@@ -600,6 +600,23 @@ constexpr Layout kRacingLefty = {{
     {0.570f, 0.07f, 0.04f},  {0.890f, 0.60f, 0.048f}, {0.890f, 0.80f, 0.048f}, {0.936f, 0.70f, 0.048f},
     {0.844f, 0.70f, 0.048f}, {0.095f, 0.76f, 0.06f},  {0.860f, 0.68f, 0.12f},
 }};
+// Xbox Classic (the hakuX way): the stick under the left thumb, the A B X Y diamond under the right one, LT and RT
+// as buttons on the upper edges, black and white above them
+constexpr Layout kRacingXbox = {{
+    {0.940f, 0.34f, 0.062f}, {0.060f, 0.34f, 0.062f}, {0.880f, 0.76f, 0.060f}, {0.935f, 0.64f, 0.060f},
+    {0.825f, 0.64f, 0.060f}, {0.880f, 0.52f, 0.060f}, {0.940f, 0.18f, 0.045f}, {0.060f, 0.18f, 0.045f},
+    {0.430f, 0.07f, 0.04f},  {0.500f, 0.07f, 0.04f},  {0.360f, 0.07f, 0.045f}, {0.036f, 0.08f, 0.045f},
+    {0.570f, 0.07f, 0.04f},  {0.110f, 0.60f, 0.048f}, {0.110f, 0.80f, 0.048f}, {0.064f, 0.70f, 0.048f},
+    {0.156f, 0.70f, 0.048f}, {0.880f, 0.76f, 0.06f},  {0.140f, 0.68f, 0.12f},
+}};
+// Android: the racing layout with the game's own actions drawn on the buttons, a small A B X Y badge on each
+constexpr Layout kRacingAndroid = {{
+    {0.940f, 0.62f, 0.17f},  {0.810f, 0.70f, 0.13f},  {0.895f, 0.89f, 0.058f}, {0.720f, 0.52f, 0.058f},
+    {0.635f, 0.68f, 0.055f}, {0.660f, 0.36f, 0.055f}, {0.560f, 0.22f, 0.050f}, {0.480f, 0.28f, 0.050f},
+    {0.430f, 0.07f, 0.04f},  {0.500f, 0.07f, 0.04f},  {0.360f, 0.07f, 0.045f}, {0.036f, 0.08f, 0.045f},
+    {0.570f, 0.07f, 0.04f},  {0.110f, 0.60f, 0.048f}, {0.110f, 0.80f, 0.048f}, {0.064f, 0.70f, 0.048f},
+    {0.156f, 0.70f, 0.048f}, {0.905f, 0.76f, 0.06f},  {0.140f, 0.68f, 0.12f},
+}};
 struct Preset {
     const char* id;
     const char* label;
@@ -608,7 +625,12 @@ struct Preset {
 };
 constexpr Preset kPresets[] = {{"default", "DEFAULT", &kRacingDefault, true},
                                {"original", "ORIGINAL", &kRacingOriginal, false},
-                               {"lefty", "LEFTY", &kRacingLefty, true}};
+                               {"lefty", "LEFTY", &kRacingLefty, true},
+                               {"xbox", "XBOX CLASSIC", &kRacingXbox, false},
+                               {"android", "ANDROID", &kRacingAndroid, true}};
+// the launcher's touch_style option: 0 Xbox Classic, 1 Android
+constexpr size_t kXboxPreset = 3, kAndroidPreset = 4;
+bool AndroidStyle() { return game::Opt().touch_style == 1; }
 
 constexpr float kStickZone = 0.42f;    // share of the width from the left a touch takes the stick in
 constexpr float kLookCounts = 1800.0f;  // mouse counts a swipe across the screen's width turns: 90 degrees
@@ -696,9 +718,16 @@ void LoadLayout() {
     g_loaded = true;
     try {
         toml::table t = toml::parse_file(LayoutFile().string());
-        std::string preset = t["preset"].value_or(std::string("default"));
-        for (size_t i = 0; i < std::size(kPresets); i++)
-            if (preset == kPresets[i].id) g_preset = i;
+        // the launcher's style decides the layout; the player's own moves and preset hold only while it is the one
+        // they were made under
+        const int style = AndroidStyle() ? 1 : 0;
+        const bool same_style = t["style"].value_or(int64_t(-1)) == style;
+        g_preset = style == 1 ? kAndroidPreset : kXboxPreset;
+        if (same_style) {
+            std::string preset = t["preset"].value_or(std::string("xbox"));
+            for (size_t i = 0; i < std::size(kPresets); i++)
+                if (preset == kPresets[i].id) g_preset = i;
+        }
         g_layout = *kPresets[g_preset].places;
         g_opacity = std::clamp(float(t["opacity"].value_or(double(g_opacity))), 0.2f, 1.0f);
         g_scale = std::clamp(float(t["scale"].value_or(double(g_scale))), 0.5f, 1.5f);
@@ -711,7 +740,7 @@ void LoadLayout() {
             // the menus' controls are not in the editor: always the preset's
             if (i != kStick && kButtons[i].when == When::Menus) continue;
             const char* id = i == kStick ? "stick" : kButtons[i].id;
-            const toml::table* p = t["controls"][id].as_table();
+            const toml::table* p = same_style ? t["controls"][id].as_table() : nullptr;
             if (!p) continue;
             Place& pl = g_layout[i];
             pl.x = std::clamp(float((*p)["x"].value_or(double(pl.x))), 0.0f, 1.0f);
@@ -720,6 +749,10 @@ void LoadLayout() {
             pl.hidden = (*p)["hidden"].value_or(false) && i != kStick && !kButtons[i].keep;
         }
     } catch (...) {
+        // no layout file yet: the style's own
+        g_preset = AndroidStyle() ? kAndroidPreset : kXboxPreset;
+        g_layout = *kPresets[g_preset].places;
+        g_pedal_sliders = kPresets[g_preset].pedals;
     }
 }
 
@@ -730,7 +763,7 @@ void SaveLayout() {
         controls.insert(i == kStick ? "stick" : kButtons[i].id,
                         toml::table{{"x", double(p.x)}, {"y", double(p.y)}, {"r", double(p.r)}, {"hidden", p.hidden}});
     }
-    toml::table t{{"preset", kPresets[g_preset].id}, {"opacity", double(g_opacity)}, {"scale", double(g_scale)},
+    toml::table t{{"style", int64_t(AndroidStyle() ? 1 : 0)}, {"preset", kPresets[g_preset].id}, {"opacity", double(g_opacity)}, {"scale", double(g_scale)},
                   {"skin", kSkinIds[g_skin]}, {"stick", g_fixed_stick ? "fixed" : "floating"}, {"controls", controls}};
     std::ofstream(LayoutFile()) << t << "\n";
 }
@@ -869,7 +902,7 @@ bool DpadStep(uint64_t held) {
     return held >= kRepeatAfterMs && (held - kRepeatAfterMs) % kRepeatMs < kStepMs / 2;
 }
 
-bool Dpad(size_t i) { return kButtons[i].press >= kBit && kButtons[i].press < kBit + 4 && kButtons[i].when == When::Menus; }
+bool Dpad(size_t i) { return kButtons[i].press >= kBit && kButtons[i].press < kBit + 4; }
 
 void Recount() {
     std::fill(std::begin(g_pressed), std::end(g_pressed), false);
@@ -1566,7 +1599,21 @@ void Draw() {
             font_scale = 0.45f;
         }
 
-        if (xbox_lbl) {
+        if (xbox_lbl && AndroidStyle() && b.icon != Icon::Gas && b.icon != Icon::Brake) {
+            // the action's own icon in the button's colour, the controller's letter as a small badge
+            float k = on ? 0.94f : 1.0f;
+            dl->AddCircleFilled(ImVec2(cx, cy), r * k, on ? Fade(60, 66, 76, 255) : Fade(14, 17, 22, 215 * fade / 100), 48);
+            dl->AddCircle(ImVec2(cx, cy), r * k, ring_col, 48, th * 1.1f);
+            DrawIcon({dl, ImVec2(cx, cy), r * k * 0.95f, Fade(255, 255, 255, on ? 255 : 235 * fade / 100), th * 1.3f},
+                     b.icon);
+            if (xbox_lbl[1] == 0 && (b.press >= kAnalogA && b.press <= kAnalogY)) {
+                float br = r * k * 0.40f;
+                ImVec2 bc(cx + r * k * 0.74f, cy - r * k * 0.74f);
+                dl->AddCircleFilled(bc, br, bg_col | IM_COL32_A_MASK, 32);
+                dl->AddCircle(bc, br, IM_COL32(255, 255, 255, 235), 32, th * 0.8f);
+                CentredText(dl, bc, br * 1.35f, txt_col, xbox_lbl);
+            }
+        } else if (xbox_lbl) {
             float k = on ? 0.94f : 1.0f;
             dl->AddCircleFilled(ImVec2(cx, cy), r * k, bg_col, 48);
             dl->AddCircle(ImVec2(cx, cy), r * k, ring_col, 48, th * 0.9f);

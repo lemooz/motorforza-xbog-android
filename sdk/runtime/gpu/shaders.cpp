@@ -94,10 +94,10 @@ float4 ilu_lit(float4 s) {
 }
 float fogfactor(float d) {
     if (fogp.w == 4) return d; // enabled fog, vertex factor supplied directly
-    if (fogp.w == 3) return saturate((d - fogp.x) / (fogp.y - fogp.x));
-    if (fogp.w == 1) return 1.0 - exp(-d * fogp.z);
-    if (fogp.w == 2) return 1.0 - exp(-(d * fogp.z) * (d * fogp.z));
-    return 0;
+    if (fogp.w == 3) return (fogp.y - d) / (fogp.y - fogp.x);
+    if (fogp.w == 1) return exp(-d * fogp.z);
+    if (fogp.w == 2) return exp(-(d * fogp.z) * (d * fogp.z));
+    return 1;
 }
 )";
 
@@ -815,7 +815,7 @@ std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode,
     o.tc1 = oT1;
     o.tc2 = oT2;
     o.tc3 = oT3;
-    o.fogamt = fogfactor(fogp.w == 4 ? oFog.x : abs(cp.z));
+    o.fogamt = fogfactor(abs(cp.z));
     return o;
 }
 )";
@@ -873,7 +873,7 @@ std::string PixelHlsl(const PixelKey& k) {
             body += "outc.rgb = " + D + " + lerp(" + C + ", " + B + ", " + A + ");\n";
             body += "outc.a = " + G + ";\n";
         } else {
-            body += "float4 outc = float4(lerp(r0.rgb, fogin.rgb, fogin.a), r0.a);\n";
+            body += "float4 outc = float4(lerp(fogin.rgb, r0.rgb, fogin.a), r0.a);\n";
         }
     } else {
         body += "float4 cur = v0, tmp = 0;\n";
@@ -900,7 +900,7 @@ std::string PixelHlsl(const PixelKey& k) {
             body += F("{ float3 c3 = saturate(%s); float c1 = saturate(%s); %s = float4(c3, c1); }\n", rgb.c_str(), a.c_str(), dst);
         }
         body += "cur.rgb = saturate(cur.rgb + v1.rgb);\n";
-        body += "float4 outc = float4(lerp(cur.rgb, fogin.rgb, fogin.a), cur.a);\n";
+        body += "float4 outc = float4(lerp(fogin.rgb, cur.rgb, fogin.a), cur.a);\n";
     }
     body += "alphatest(outc.a);\n" + Hooks().Output() + "return outc;\n}\n";
     s += body;

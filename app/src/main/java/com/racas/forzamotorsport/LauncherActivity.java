@@ -78,14 +78,14 @@ public final class LauncherActivity extends Activity {
         menu.setOrientation(LinearLayout.VERTICAL);
         menu.setGravity(Gravity.CENTER_VERTICAL);
         menu.setTranslationY(-dp(20));
-        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(0, -2, 0.88f);
+        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(0, -2, 0.78f);
         menuParams.rightMargin = dp(16);
         content.addView(menu, menuParams);
         menu.addView(button(LauncherIcon.PLAY, "JOGAR", true, () -> startActivity(new Intent(this, ForzaActivity.class))));
         menu.addView(button(LauncherIcon.SETTINGS, "CONFIGURAÇÕES", false, this::toggleSettings));
         menu.addView(button(LauncherIcon.DISC, "SELECIONAR ISO", false, this::pickIso));
         menu.addView(button(LauncherIcon.EXIT, "SAIR", false, this::finish));
-        TextView version = label("MOTORFORZA  ·  ANDROID", 9, 0xE6FFFFFF, true);
+        TextView version = label("MOTORFORZA  ·  v" + versionName(), 10, 0xE6FFFFFF, true);
         version.setGravity(Gravity.CENTER);
         version.setBackground(outlined(0xAA101216, 0x88FFFFFF, 7));
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, dp(26));
@@ -97,23 +97,22 @@ public final class LauncherActivity extends Activity {
         // stretching it from edge to edge on tall displays. It remains scrollable
         // on smaller screens.
         scroller.setFillViewport(false);
-        scroller.setBackground(outlined(0xD9161A20, 0xB8FFFFFF, 10));
+        scroller.setBackground(outlined(0xEB12161C, 0xB8FFFFFF, 12));
         scroller.setClipToPadding(false);
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
         // In landscape some Android versions report the unrotated display metrics.
         // Use the short edge so the card follows the reference proportions on phones.
         int screenHeight = Math.min(metrics.widthPixels, metrics.heightPixels);
-        int availableHeight = Math.max(dp(220), screenHeight * 76 / 100);
-        int panelHeight = Math.min(dp(340), Math.min(availableHeight, Math.max(dp(1), screenHeight - dp(20))));
+        int availableHeight = Math.max(dp(220), screenHeight * 92 / 100);
+        int panelHeight = Math.min(dp(520), Math.min(availableHeight, Math.max(dp(1), screenHeight - dp(16))));
         settingsCard = scroller;
-        scroller.setTranslationY(-dp(24));
-        LinearLayout.LayoutParams panelParams = new LinearLayout.LayoutParams(0, panelHeight, 0.82f);
+        LinearLayout.LayoutParams panelParams = new LinearLayout.LayoutParams(0, panelHeight, 1.55f);
         content.addView(scroller, panelParams);
         View spacer = new View(this);
-        content.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1.15f));
+        content.addView(spacer, new LinearLayout.LayoutParams(0, 1, 0.1f));
         settingsPanel = new LinearLayout(this);
         settingsPanel.setOrientation(LinearLayout.VERTICAL);
-        settingsPanel.setPadding(dp(11), dp(1), dp(11), dp(1));
+        settingsPanel.setPadding(dp(16), dp(8), dp(16), dp(12));
         scroller.addView(settingsPanel);
         addSettings();
         setContentView(root);
@@ -211,110 +210,101 @@ public final class LauncherActivity extends Activity {
         }
     }
 
-    // A TextView subclass is not needed for layout; this method is replaced by addButton below.
-    private void addSettings() {
-        settingsPanel.addView(section("RENDERIZAÇÃO"));
-        
-        String driverName = readString("custom_driver_name", "Padrão do Sistema (Vulkan Mali)");
-        TextView driverStatus = label("Driver Ativo: " + driverName, 10, WHITE, true);
-        driverStatus.setPadding(dp(2), dp(2), dp(2), dp(2));
-        settingsPanel.addView(driverStatus);
+    private static final int ACCENT = 0xFFFFC400;
+    private static final int MUTED = 0xFFB8BEC6;
+    private static final int TEXT = 0xFFF2F4F7;
 
+    // the release this build is, as on GitHub (the APK repack keeps the manifest of the base)
+    private static final String VERSION = "0.4-pre";
+
+    private String versionName() {
+        try {
+            return VERSION;
+        } catch (Exception e) { return "0.4-pre"; }
+    }
+
+    private void addSettings() {
+        // ---- RENDERIZAÇÃO
+        settingsPanel.addView(section("RENDERIZAÇÃO"));
+
+        String driverName = readString("custom_driver_name", "Padrão do Sistema (Vulkan Mali)");
+        settingsPanel.addView(rowTitle("Driver gráfico"));
+        settingsPanel.addView(rowHint("Ativo: " + driverName));
         LinearLayout driverBtns = new LinearLayout(this);
         driverBtns.setOrientation(LinearLayout.HORIZONTAL);
-
-        TextView selectBtn = label("SELECIONAR", 9, WHITE, true);
-        selectBtn.setGravity(Gravity.CENTER);
-        selectBtn.setPadding(dp(4), dp(2), dp(4), dp(2));
-        selectBtn.setBackground(outlined(0x44203040, 0x885090FF, 6));
-        selectBtn.setOnClickListener(v -> showDriverSelectDialog());
-        driverBtns.addView(selectBtn, new LinearLayout.LayoutParams(0, dp(32), 1.0f));
-
-        View btnSpace1 = new View(this);
-        driverBtns.addView(btnSpace1, new LinearLayout.LayoutParams(dp(4), 1));
-
-        TextView importBtn = label("IMPORTAR (.ZIP)", 9, WHITE, true);
-        importBtn.setGravity(Gravity.CENTER);
-        importBtn.setPadding(dp(4), dp(2), dp(4), dp(2));
-        importBtn.setBackground(outlined(0x44204030, 0x8840D080, 6));
-        importBtn.setOnClickListener(v -> pickDriverZip());
-        driverBtns.addView(importBtn, new LinearLayout.LayoutParams(0, dp(32), 1.0f));
-
-        View btnSpace2 = new View(this);
-        driverBtns.addView(btnSpace2, new LinearLayout.LayoutParams(dp(4), 1));
-
-        TextView resetBtn = label("RESTAURAR", 9, 0xFFE0E0E0, true);
-        resetBtn.setGravity(Gravity.CENTER);
-        resetBtn.setPadding(dp(4), dp(2), dp(4), dp(2));
-        resetBtn.setBackground(outlined(0x44302020, 0x88FF6060, 6));
-        resetBtn.setOnClickListener(v -> resetSystemDriver());
-        driverBtns.addView(resetBtn, new LinearLayout.LayoutParams(0, dp(32), 1.0f));
-
+        driverBtns.addView(chip("SELECIONAR", 0x55305080, 0xFF5090FF, v -> showDriverSelectDialog()),
+                new LinearLayout.LayoutParams(0, dp(40), 1f));
+        driverBtns.addView(gap(), new LinearLayout.LayoutParams(dp(8), 1));
+        driverBtns.addView(chip("IMPORTAR .ZIP", 0x55305040, 0xFF40D080, v -> pickDriverZip()),
+                new LinearLayout.LayoutParams(0, dp(40), 1f));
+        driverBtns.addView(gap(), new LinearLayout.LayoutParams(dp(8), 1));
+        driverBtns.addView(chip("RESTAURAR", 0x55503030, 0xFFFF6060, v -> resetSystemDriver()),
+                new LinearLayout.LayoutParams(0, dp(40), 1f));
         LinearLayout.LayoutParams dbp = new LinearLayout.LayoutParams(-1, -2);
-        dbp.topMargin = dp(2);
-        dbp.bottomMargin = dp(4);
+        dbp.topMargin = dp(4);
+        dbp.bottomMargin = dp(8);
         settingsPanel.addView(driverBtns, dbp);
 
-        settingsPanel.addView(label("Resolução Interna", 10, 0xFFE4E7EB, false));
-        addSpinner(new String[] {"Nativa 480p (Xbox 1x - Mais Rapido)", "540p (50%)", "720p (67%)", "1080p (100%)"},
+        settingsPanel.addView(rowTitle("Resolução interna"));
+        addSpinner(new String[] {"Nativa 480p (Xbox 1x - mais rápido)", "540p (50%)", "720p (67%)", "1080p (100%)"},
                 new int[] {44, 50, 67, 100}, readInt("render_percent", 44), "render_percent");
-        LinearLayout filterRow = new LinearLayout(this);
-        filterRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView filterLabel = label("Filtro Anisotrópico", 10, 0xFFE4E7EB, false);
-        filterRow.addView(filterLabel, new LinearLayout.LayoutParams(0, dp(30), 1));
-        Switch aniso = new Switch(this);
-        aniso.setShowText(false);
-        aniso.setThumbTintList(new ColorStateList(
-                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-                new int[] {0xFFFFFFFF, 0xFFE2E5E9}));
-        aniso.setTrackTintList(new ColorStateList(
-                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-                new int[] {0xFFFFC400, 0xFF747A82}));
-        aniso.setChecked(readInt("anisotropic_filtering", 0) > 0);
-        aniso.setOnCheckedChangeListener((b, checked) -> writeSetting("anisotropic_filtering", checked ? 16 : 0));
-        filterRow.addView(aniso, new LinearLayout.LayoutParams(-2, dp(30)));
-        settingsPanel.addView(filterRow);
 
-        // Monitoramento de Desempenho (FPS, CPU, GPU)
-        LinearLayout fpsRow = new LinearLayout(this);
-        fpsRow.setGravity(Gravity.CENTER_VERTICAL);
-        fpsRow.setPadding(0, dp(2), 0, dp(2));
-        
-        LinearLayout fpsTextCol = new LinearLayout(this);
-        fpsTextCol.setOrientation(LinearLayout.VERTICAL);
-        TextView fpsLabel = label("Monitor de Desempenho (FPS, CPU, GPU)", 10, 0xFFFFFFFF, true);
-        TextView fpsSub = label("Exibe FPS, tempo de quadro, CPU% e temp. na tela", 8, 0xFFA0A5AA, false);
-        fpsTextCol.addView(fpsLabel);
-        fpsTextCol.addView(fpsSub);
-        fpsRow.addView(fpsTextCol, new LinearLayout.LayoutParams(0, -2, 1));
+        addToggle("Filtro anisotrópico", "Texturas mais nítidas em ângulos rasos", readInt("anisotropic_filtering", 0) > 0,
+                0xFFFFC400, checked -> writeSetting("anisotropic_filtering", checked ? 16 : 0));
 
-        Switch fpsSwitch = new Switch(this);
-        fpsSwitch.setShowText(false);
-        fpsSwitch.setThumbTintList(new ColorStateList(
-                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-                new int[] {0xFFFFFFFF, 0xFFE2E5E9}));
-        fpsSwitch.setTrackTintList(new ColorStateList(
-                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-                new int[] {0xFF00E676, 0xFF747A82}));
-        fpsSwitch.setChecked(readBool("fps_counter", true));
-        fpsSwitch.setOnCheckedChangeListener((b, checked) -> writeSettingBool("fps_counter", checked));
-        fpsRow.addView(fpsSwitch, new LinearLayout.LayoutParams(-2, dp(30)));
-        settingsPanel.addView(fpsRow);
+        // ---- DESEMPENHO
+        settingsPanel.addView(section("DESEMPENHO"));
+        addToggle("Overlay de desempenho", "Mostra FPS, tempo de quadro, CPU e temperatura sobre o jogo",
+                readBool("fps_counter", true), 0xFF00E676, checked -> writeSettingBool("fps_counter", checked));
 
+        settingsPanel.addView(rowTitle("Limite de FPS"));
+        settingsPanel.addView(rowHint("O Forza Motorsport rodava a 60 FPS no Xbox original."));
+        int cap = readInt("fps_cap", 0);
+        addSegmented(new String[] {"30 FPS", "60 FPS  ★ Original", "Ilimitado"}, new int[] {30, 60, 0},
+                cap == 30 || cap == 60 ? cap : 0, value -> {
+                    if (value == 60) {
+                        writeSetting("fps_cap", 60);
+                        recreateSettings();
+                        return;
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle("Alterar o limite de FPS?")
+                            .setMessage("O jogo foi feito para rodar a 60 FPS no Xbox original. "
+                                    + (value == 30 ? "Limitar a 30 FPS" : "Deixar o FPS ilimitado")
+                                    + " pode alterar a velocidade original do jogo (física, corrida e animações).\n\n"
+                                    + "Para a velocidade fiel ao original, use 60 FPS.")
+                            .setPositiveButton("Continuar", (d, w) -> {
+                                writeSetting("fps_cap", value);
+                                recreateSettings();
+                            })
+                            .setNegativeButton("Cancelar", (d, w) -> recreateSettings())
+                            .setOnCancelListener(d -> recreateSettings())
+                            .show();
+                });
+
+        // ---- CONTROLES
         settingsPanel.addView(section("CONTROLES"));
-        addValueRow("Controle de Toque", "Xbox Clássico");
-        settingsPanel.addView(label("Mapeamento de Gamepad", 10, 0xFFE4E7EB, false));
+        settingsPanel.addView(rowTitle("Controle de toque"));
+        int style = readInt("touch_style", 0) == 1 ? 1 : 0;
+        addSegmented(new String[] {"Xbox Clássico", "Android"}, new int[] {0, 1}, style, value -> {
+            writeSetting("touch_style", value);
+            recreateSettings();
+        });
+        settingsPanel.addView(rowHint(style == 0
+                ? "Botões A, B, X, Y em losango, gatilhos LT/RT nas bordas e analógico à esquerda, como em um controle de Xbox."
+                : "Botões com o ícone da ação na corrida (freio de mão, olhar para trás, reiniciar, câmera, marchas) e a letra A/B/X/Y num selo pequeno."));
+
+        settingsPanel.addView(rowTitle("Mapeamento de gamepad"));
         addSpinner(new String[] {"Padrão", "Trocar A / B", "Trocar analógicos"}, new int[] {0, 1, 2},
                 readInt("gamepad_preset", 0), "gamepad_preset");
-        settingsPanel.addView(label("Força de Feedback", 10, 0xFFE4E7EB, false));
+        settingsPanel.addView(rowTitle("Força de feedback"));
         SeekBar feedback = new SeekBar(this);
         feedback.setMax(100);
         feedback.setProgress(readPercent("force_feedback", 100));
-        feedback.setProgressTintList(ColorStateList.valueOf(0xFFF3F4F5));
+        feedback.setProgressTintList(ColorStateList.valueOf(ACCENT));
         feedback.setThumbTintList(ColorStateList.valueOf(0xFFFFFFFF));
         feedback.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF777C82));
-        feedback.setMaxHeight(dp(4));
-        feedback.setMinimumHeight(dp(24));
+        feedback.setMinimumHeight(dp(36));
         feedback.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 if (fromUser) writeSetting("force_feedback", progress);
@@ -324,9 +314,99 @@ public final class LauncherActivity extends Activity {
         });
         settingsPanel.addView(feedback);
 
+        // ---- SISTEMA
         settingsPanel.addView(section("SISTEMA"));
         addValueRow("Idioma", "Internacional");
-        addValueRow("Versão", "MotorForza 1.0 (ARM64 Nativo)");
+        addValueRow("Versão", "MotorForza v" + versionName() + " (ARM64 nativo)");
+    }
+
+    /** A toggle drawn by hand: the platform Switch does not show under this theme. */
+    private final class PillSwitch extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final int onColor;
+        private boolean on;
+
+        PillSwitch(int onColor, boolean on, java.util.function.Consumer<Boolean> change) {
+            super(LauncherActivity.this);
+            this.onColor = onColor;
+            this.on = on;
+            setClickable(true);
+            setOnClickListener(v -> {
+                this.on = !this.on;
+                invalidate();
+                change.accept(this.on);
+            });
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float w = getWidth(), h = getHeight();
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(on ? onColor : 0xFF4A5058);
+            canvas.drawRoundRect(0, h * 0.12f, w, h * 0.88f, h, h, paint);
+            paint.setColor(0xFFFFFFFF);
+            float r = h * 0.36f;
+            canvas.drawCircle(on ? w - h * 0.5f : h * 0.5f, h * 0.5f, r, paint);
+        }
+    }
+
+    private View gap() { return new View(this); }
+
+    private TextView rowTitle(String text) {
+        TextView v = label(text, 13, TEXT, true);
+        v.setPadding(0, dp(8), 0, dp(2));
+        return v;
+    }
+
+    private TextView rowHint(String text) {
+        TextView v = label(text, 11, MUTED, false);
+        v.setPadding(0, 0, 0, dp(4));
+        return v;
+    }
+
+    private TextView chip(String text, int fill, int stroke, View.OnClickListener click) {
+        TextView v = label(text, 11, WHITE, true);
+        v.setGravity(Gravity.CENTER);
+        v.setSingleLine(true);
+        v.setBackground(outlined(fill, stroke, 8));
+        v.setClickable(true);
+        v.setOnClickListener(click);
+        return v;
+    }
+
+    private void addToggle(String title, String hint, boolean checked, int onColor, java.util.function.Consumer<Boolean> change) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(8), 0, dp(4));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.addView(label(title, 13, TEXT, true));
+        col.addView(label(hint, 11, MUTED, false));
+        row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
+        PillSwitch sw = new PillSwitch(onColor, checked, c -> change.accept(c));
+        row.addView(sw, new LinearLayout.LayoutParams(dp(56), dp(32)));
+        settingsPanel.addView(row);
+    }
+
+    /** A row of options side by side, the current one filled: easier to read and to tap than a dialog. */
+    private void addSegmented(String[] labels, int[] values, int current, java.util.function.IntConsumer pick) {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < labels.length; i++) {
+            final int value = values[i];
+            boolean on = value == current;
+            TextView t = label(labels[i], 12, on ? 0xFF14171C : TEXT, true);
+            t.setGravity(Gravity.CENTER);
+            t.setSingleLine(true);
+            t.setBackground(outlined(on ? ACCENT : 0x55222830, on ? ACCENT : 0x88FFFFFF, 8));
+            t.setClickable(true);
+            t.setOnClickListener(v -> { if (value != current) pick.accept(value); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+            if (i > 0) lp.leftMargin = dp(6);
+            bar.addView(t, lp);
+        }
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1, -2);
+        bp.bottomMargin = dp(4);
+        settingsPanel.addView(bar, bp);
     }
 
     private void recreateSettings() {
@@ -494,13 +574,13 @@ public final class LauncherActivity extends Activity {
     private void addValueRow(String label, String value) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView name = label(label, 10, 0xFFE4E7EB, false);
-        row.addView(name, new LinearLayout.LayoutParams(0, dp(22), 1));
-        TextView current = label(value, 10, WHITE, true);
+        TextView name = label(label, 13, TEXT, false);
+        row.addView(name, new LinearLayout.LayoutParams(0, dp(34), 1));
+        TextView current = label(value, 12, WHITE, true);
         current.setGravity(Gravity.CENTER);
-        current.setPadding(dp(8), 0, dp(8), 0);
-        current.setBackground(outlined(0x33111519, 0x77FFFFFF, 6));
-        row.addView(current, new LinearLayout.LayoutParams(-2, dp(22)));
+        current.setPadding(dp(10), 0, dp(10), 0);
+        current.setBackground(outlined(0x33111519, 0x77FFFFFF, 8));
+        row.addView(current, new LinearLayout.LayoutParams(-2, dp(30)));
         settingsPanel.addView(row);
     }
 
@@ -531,11 +611,11 @@ public final class LauncherActivity extends Activity {
         for (int i = 0; i < values.length; i++) if (values[i] == current) selected = i;
         final int[] selectedItem = {selected};
         FrameLayout choice = new FrameLayout(this);
-        choice.setBackground(outlined(0x33111519, 0x66FFFFFF, 6));
-        TextView value = label(choices[selected], 10, WHITE, false);
+        choice.setBackground(outlined(0x55222830, 0x88FFFFFF, 8));
+        TextView value = label(choices[selected], 12, WHITE, false);
         value.setSingleLine(true);
         value.setGravity(Gravity.CENTER_VERTICAL);
-        value.setPadding(dp(7), 0, dp(24), 0);
+        value.setPadding(dp(10), 0, dp(30), 0);
         choice.addView(value, new FrameLayout.LayoutParams(-1, -1));
         TextView arrow = label("⌄", 16, WHITE, true);
         arrow.setGravity(Gravity.CENTER);
@@ -551,8 +631,8 @@ public final class LauncherActivity extends Activity {
                     if (key != null) writeSetting(key, values[which]);
                     dialog.dismiss();
                 }).setNegativeButton("Cancelar", null).show());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(25));
-        params.bottomMargin = dp(1);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(40));
+        params.bottomMargin = dp(4);
         settingsPanel.addView(choice, params);
     }
 
@@ -586,7 +666,7 @@ public final class LauncherActivity extends Activity {
             Pattern p = Pattern.compile("(?m)^\\s*" + Pattern.quote(key) + "\\s*=\\s*[^\\r\\n]*");
             Matcher m = p.matcher(content);
             String line = key + " = " + (key.equals("force_feedback") ? String.format(java.util.Locale.ROOT, "%.2f", value / 100.0) : value);
-            content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : content + (content.endsWith("\n") || content.isEmpty() ? "" : "\n") + line + "\n";
+            content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : insertKey(content, line);
             File temp = new File(own, "forza.toml.tmp");
             Files.write(temp.toPath(), content.getBytes(StandardCharsets.UTF_8));
             if (!temp.renameTo(file)) {
@@ -616,7 +696,7 @@ public final class LauncherActivity extends Activity {
             Pattern p = Pattern.compile("(?m)^\\s*" + Pattern.quote(key) + "\\s*=\\s*[^\\r\\n]*");
             Matcher m = p.matcher(content);
             String line = key + " = \"" + value + "\"";
-            content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : content + (content.endsWith("\n") || content.isEmpty() ? "" : "\n") + line + "\n";
+            content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : insertKey(content, line);
             File temp = new File(own, "forza.toml.tmp");
             Files.write(temp.toPath(), content.getBytes(StandardCharsets.UTF_8));
             if (!temp.renameTo(file)) {
@@ -650,7 +730,7 @@ public final class LauncherActivity extends Activity {
             Pattern p = Pattern.compile("(?m)^\\s*" + Pattern.quote(key) + "\\s*=\\s*[^\\r\\n]*");
             Matcher m = p.matcher(content);
             String line = key + " = " + (value ? "true" : "false");
-            content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : content + (content.endsWith("\n") || content.isEmpty() ? "" : "\n") + line + "\n";
+            content = m.find() ? m.replaceFirst(Matcher.quoteReplacement(line)) : insertKey(content, line);
             File temp = new File(own, "forza.toml.tmp");
             Files.write(temp.toPath(), content.getBytes(StandardCharsets.UTF_8));
             if (!temp.renameTo(file)) {
@@ -660,9 +740,18 @@ public final class LauncherActivity extends Activity {
         } catch (Exception e) { Toast.makeText(this, "Não foi possível salvar a configuração.", Toast.LENGTH_SHORT).show(); }
     }
 
+    /** A key the file lacks goes in before the first [table]: after one it would be the table's, not the top level's. */
+    private static String insertKey(String content, String line) {
+        Matcher h = Pattern.compile("(?m)^\\s*\\[").matcher(content);
+        if (h.find()) return content.substring(0, h.start()) + line + "\n" + content.substring(h.start());
+        return content + (content.endsWith("\n") || content.isEmpty() ? "" : "\n") + line + "\n";
+    }
+
     private TextView section(String value) {
-        TextView v = label(value, 10, 0xFFE3E5E8, true);
-        v.setPadding(0, dp(2), 0, 0);
+        TextView v = label(value, 13, ACCENT, true);
+        v.setLetterSpacing(0.08f);
+        v.setPadding(0, dp(14), 0, dp(4));
+        v.setBackground(null);
         return v;
     }
     private TextView label(String text, int size, int color, boolean bold) {
